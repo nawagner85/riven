@@ -2,32 +2,24 @@ from abc import ABC, abstractmethod
 from collections.abc import Generator
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, TypeAlias
 
 from program.settings.models import Observable
 from program.media.item import MediaItem
 
 
-type MediaItemGenerator[T: MediaItem = MediaItem] = Generator[
-    RunnerResult[T], None, RunnerResult[T] | None
+# Use TypeAlias for Python 3.12 compatibility (upstream uses Python 3.13+ 'type' syntax)
+# TODO: migrate to `type MediaItemGenerator[T: MediaItem = MediaItem]` when Python 3.13+ is required
+MediaItemGenerator: TypeAlias = Generator[
+    "RunnerResult", None, "RunnerResult | None"
 ]
 
-TSettings = TypeVar(
-    "TSettings",
-    bound=Observable | None,
-    default=Observable,
-    covariant=True,
-)
-
-TService = TypeVar("TService", bound=Any | None, default="Runner")
-
-TItemType = TypeVar("TItemType", bound=MediaItem, default=MediaItem, covariant=True)
-
-TRunnerReturnType = TypeVar(
-    "TRunnerReturnType",
-    bound=MediaItemGenerator | dict[str, str] | bool | None,
-    default=MediaItemGenerator,
-)
+# For Python 3.12 compatibility, use a single TypeVar instead of 3 separate ones with defaults
+# Upstream (Python 3.13+) would use TSettings and TService as separate params with defaults
+TSettings = TypeVar("TSettings", bound=Observable | None)
+TService = TypeVar("TService", bound=Any | None)
+TRunnerReturnType = TypeVar("TRunnerReturnType")
+TItemType = TypeVar("TItemType", bound=MediaItem)
 
 
 @dataclass
@@ -36,12 +28,21 @@ class RunnerResult(Generic[TItemType]):
     run_at: datetime | None = None
 
 
-class Runner(ABC, Generic[TSettings, TService, TRunnerReturnType]):
-    """Base class for all runners"""
+class Runner(ABC, Generic[TSettings]):
+    """Base class for all runners
+
+    In Python 3.13+, this would use Generic[TSettings, TService=None, TRunnerReturnType=MediaItemGenerator]
+    For Python 3.12 compatibility, we provide __class_getitem__ to accept variable type parameters.
+    """
 
     is_content_service: bool = False
     settings: TSettings
-    services = dict[type[TService], TService]()
+    services = dict[type[Any], Any]()
+
+    def __class_getitem__(cls, params: Any) -> Any:
+        """Allow variable number of type parameters for backward compatibility with Python 3.12"""
+        # Just return the class to avoid TypeVar parameter mismatches
+        return cls
 
     def __init__(self):
         super().__init__()
@@ -74,7 +75,7 @@ class Runner(ABC, Generic[TSettings, TService, TRunnerReturnType]):
         return True
 
     @abstractmethod
-    def run(self, item: MediaItem) -> TRunnerReturnType:
+    def run(self, item: MediaItem) -> Any:
         """Run the base runner"""
 
         raise NotImplementedError
