@@ -71,3 +71,7 @@ venv.bak/
 
 # MacOs
 **/.DS_Store
+.worktrees/
+
+# Git worktrees
+.worktrees/
