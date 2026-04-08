@@ -57,7 +57,7 @@ def _find_in_directory(base: Path, expected: str) -> Path | None:
 
     expected_lower = expected.lower()
     for entry in base.iterdir():
-        if entry.name.lower().startswith(expected_lower[:20]):
+        if entry.name.lower().startswith(expected_lower):
             return entry
 
     return None
@@ -132,5 +132,7 @@ class PrismFilesystemService(Runner[PrismModel]):
             found = _find_in_directory(search_dir, expected)
             if found:
                 return found
-            time.sleep(1)
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(1, remaining))
         return None
