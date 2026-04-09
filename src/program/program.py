@@ -32,6 +32,7 @@ from program.core.runner import Runner
 
 from .state_transition import process_event
 from .services.filesystem import FilesystemService
+from program.services.filesystem.prism_filesystem_service import PrismFilesystemService
 from .types import Event
 
 from sqlalchemy import func, select, text
@@ -130,7 +131,11 @@ class Program(threading.Thread):
             scraping=Scraping(),
             updater=Updater(),
             downloader=_downloader,
-            filesystem=FilesystemService(_downloader),
+            filesystem=(
+                PrismFilesystemService()
+                if settings_manager.settings.prism.enabled
+                else FilesystemService(_downloader)
+            ),
             post_processing=PostProcessing(),
             notifications=NotificationService(),
         )
