@@ -61,9 +61,10 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
     imdb_id: Mapped[str | None]
     tvdb_id: Mapped[str | None]
     tmdb_id: Mapped[str | None]
+    mbid: Mapped[str | None]  # MusicBrainz ID (artist/release-group/recording)
     title: Mapped[str]
     poster_path: Mapped[str | None]
-    type: Mapped[Literal["episode", "season", "show", "movie", "mediaitem"]] = (
+    type: Mapped[Literal["episode", "season", "show", "movie", "mediaitem", "artist", "album", "track"]] = (
         mapped_column(nullable=False)
     )
     requested_at: Mapped[datetime | None] = mapped_column(
@@ -1247,6 +1248,396 @@ class Episode(MediaItem):
     @property
     def top_title(self) -> str:
         return self.top_parent.title
+
+
+class Artist(MediaItem):
+    """Artist class"""
+
+    __tablename__ = "Artist"
+
+    id: Mapped[int] = mapped_column(
+        sqlalchemy.ForeignKey("MediaItem.id", ondelete="CASCADE"), primary_key=True
+    )
+    albums: Mapped[list["Album"]] = relationship(
+        back_populates="parent",
+        foreign_keys="Album.parent_id",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+        order_by="Album.title",
+    )
+    subscribed: Mapped[bool] = mapped_column(sqlalchemy.Boolean, default=False)
+    last_checked_at: Mapped[datetime | None]
+
+    __mapper_args__ = {
+        "polymorphic_identity": "artist",
+        "polymorphic_load": "selectin",
+    }
+
+    @property
+    def top_parent(self) -> "Artist":
+        """Return the top-level parent"""
+
+        return self
+
+    def __init__(self, item: dict[str, Any] | None = None):
+        self.type = "artist"
+
+        if item:
+            self.albums = item.get("albums", [])
+            self.subscribed = item.get("subscribed", False)
+            self.last_checked_at = item.get("last_checked_at")
+
+        super().__init__(item)
+
+    def _determine_state(self):
+        if len(self.albums) > 0:
+            if all(album.state == States.Paused for album in self.albums):
+                return States.Paused
+
+            if all(album.state == States.Failed for album in self.albums):
+                return States.Failed
+
+            if all(album.state == States.Completed for album in self.albums):
+                if self.subscribed:
+                    return States.Ongoing
+
+                return States.Completed
+
+            if any(
+                album.state in [States.Ongoing, States.Unreleased]
+                for album in self.albums
+            ):
+                return States.Ongoing
+
+            if any(
+                album.state in (States.Completed, States.PartiallyCompleted)
+                for album in self.albums
+            ):
+                return States.PartiallyCompleted
+
+            if any(album.state == States.Symlinked for album in self.albums):
+                return States.Symlinked
+
+            if any(album.state == States.Downloaded for album in self.albums):
+                return States.Downloaded
+
+            if self.is_scraped():
+                return States.Scraped
+
+            if any(album.state == States.Indexed for album in self.albums):
+                return States.Indexed
+
+            if all(not album.is_released for album in self.albums):
+                return States.Unreleased
+
+            if any(album.state == States.Requested for album in self.albums):
+                return States.Requested
+
+            return States.Unknown
+        else:
+            return States.Unreleased
+
+    def store_state(
+        self,
+        given_state: States | None = None,
+    ) -> tuple[States | None, States]:
+        if given_state is not None:
+            for album in self.albums:
+                album.store_state(given_state)
+
+        return super().store_state(given_state)
+
+    def add_album(self, album: "Album"):
+        """Add album to artist"""
+
+        if album.title not in [a.title for a in self.albums]:
+            self.albums.append(album)
+            album.parent = self
+            self.albums = sorted(self.albums, key=lambda a: a.title or "")
+
+    @property
+    def log_string(self):
+        return self.title or "Unknown Artist"
+
+    def __repr__(self):
+        return f"Artist:{self.log_string}:{self.state.name}"
+
+    def __hash__(self):
+        return super().__hash__()
+
+    def copy(self, other: "Self") -> Self:
+        super()._copy_common_attributes(other)
+
+        self.albums = []
+
+        for album in other.albums:
+            new_album = Album().copy(album, False)
+            new_album.parent = self
+            self.albums.append(new_album)
+
+        return self
+
+
+class Album(MediaItem):
+    """Album class"""
+
+    __tablename__ = "Album"
+
+    id: Mapped[int] = mapped_column(
+        sqlalchemy.ForeignKey("MediaItem.id", ondelete="CASCADE"), primary_key=True
+    )
+    parent_id: Mapped[int] = mapped_column(
+        sqlalchemy.ForeignKey("Artist.id", ondelete="CASCADE"), use_existing_column=True
+    )
+    parent: Mapped["Artist"] = relationship(
+        lazy="selectin",
+        back_populates="albums",
+        foreign_keys="Album.parent_id",
+    )
+    tracks: Mapped[list["Track"]] = relationship(
+        back_populates="parent",
+        foreign_keys="Track.parent_id",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+        order_by="Track.track_number",
+    )
+    label: Mapped[str | None]
+    total_tracks: Mapped[int | None]
+
+    __mapper_args__ = {
+        "polymorphic_identity": "album",
+        "polymorphic_load": "selectin",
+    }
+
+    @property
+    def top_parent(self) -> "Artist":
+        """Return the top-level parent"""
+
+        return self.parent
+
+    def __init__(self, item: dict[str, Any] | None = None):
+        self.type = "album"
+
+        if item:
+            self.tracks = item.get("tracks", [])
+            self.label = item.get("label")
+            self.total_tracks = item.get("total_tracks")
+
+        super().__init__(item)
+
+    def _determine_state(self):
+        if len(self.tracks) > 0:
+            if all(track.state == States.Paused for track in self.tracks):
+                return States.Paused
+
+            if all(track.state == States.Failed for track in self.tracks):
+                return States.Failed
+
+            if all(track.state == States.Completed for track in self.tracks):
+                return States.Completed
+
+            if any(track.state == States.Unreleased for track in self.tracks):
+                if any(track.state != States.Unreleased for track in self.tracks):
+                    return States.Ongoing
+
+            if any(track.state == States.Completed for track in self.tracks):
+                return States.PartiallyCompleted
+
+            if any(track.state == States.Symlinked for track in self.tracks):
+                return States.Symlinked
+
+            if any(track.state == States.Downloaded for track in self.tracks):
+                return States.Downloaded
+
+            if self.is_scraped():
+                return States.Scraped
+
+            if any(track.state == States.Indexed for track in self.tracks):
+                return States.Indexed
+
+            if any(track.state == States.Unreleased for track in self.tracks):
+                return States.Unreleased
+
+            if any(track.state == States.Requested for track in self.tracks):
+                return States.Requested
+
+            return States.Unknown
+        else:
+            return States.Unreleased
+
+    def store_state(
+        self,
+        given_state: States | None = None,
+    ) -> tuple[States | None, States]:
+        if given_state is not None:
+            for track in self.tracks:
+                track.store_state(given_state)
+
+        return super().store_state(given_state)
+
+    def add_track(self, track: "Track"):
+        """Add track to album"""
+
+        if track.track_number in [t.track_number for t in self.tracks]:
+            return
+
+        self.tracks.append(track)
+        track.parent = self
+        self.tracks = sorted(
+            self.tracks, key=lambda t: t.track_number if t.track_number is not None else 0
+        )
+
+    @property
+    def is_released(self) -> bool:
+        if self.tracks:
+            return any(track.is_released for track in self.tracks)
+
+        return super().is_released
+
+    def __getattribute__(self, name: str):
+        """Override attribute access to inherit from parent Artist if not set"""
+
+        inherited_attrs = {
+            "poster_path",
+            "language",
+            "country",
+        }
+
+        value = object.__getattribute__(self, name)
+
+        if name in inherited_attrs and not value:
+            try:
+                return getattr(self.parent, name, value)
+            except AttributeError:
+                pass
+
+        return value
+
+    @property
+    def log_string(self):
+        try:
+            parent_title = self.parent.title
+            if parent_title:
+                return f"{parent_title} - {self.title}"
+        except (AttributeError, DetachedInstanceError):
+            pass
+
+        return self.title or "Unknown Album"
+
+    def __repr__(self):
+        return f"Album:{self.log_string}:{self.state.name}"
+
+    def __hash__(self):
+        return super().__hash__()
+
+    def copy(self, other: "Self", copy_parent: bool = True) -> Self:
+        super()._copy_common_attributes(other)
+
+        for track in other.tracks:
+            new_track = Track().copy(track, False)
+            new_track.parent = self
+            self.tracks.append(new_track)
+
+        self.label = other.label
+        self.total_tracks = other.total_tracks
+
+        if copy_parent and other.parent:
+            self.parent = Artist().copy(other.parent)
+
+        return self
+
+
+class Track(MediaItem):
+    """Track class"""
+
+    __tablename__ = "Track"
+
+    id: Mapped[int] = mapped_column(
+        sqlalchemy.ForeignKey("MediaItem.id", ondelete="CASCADE"), primary_key=True
+    )
+    parent_id: Mapped[int] = mapped_column(
+        sqlalchemy.ForeignKey("Album.id", ondelete="CASCADE"), use_existing_column=True
+    )
+    parent: Mapped["Album"] = relationship(
+        back_populates="tracks",
+        foreign_keys="Track.parent_id",
+        lazy="selectin",
+    )
+    track_number: Mapped[int | None]
+    duration_ms: Mapped[int | None]
+    isrc: Mapped[str | None]  # International Standard Recording Code
+
+    __mapper_args__ = {
+        "polymorphic_identity": "track",
+        "polymorphic_load": "selectin",
+    }
+
+    @property
+    def top_parent(self) -> "Artist":
+        """Return the top-level parent"""
+
+        return self.parent.parent
+
+    def __init__(self, item: dict[str, Any] | None = None):
+        self.type = "track"
+
+        if item:
+            self.track_number = item.get("track_number")
+            self.duration_ms = item.get("duration_ms")
+            self.isrc = item.get("isrc")
+
+        super().__init__(item)
+
+    def __getattribute__(self, name: str):
+        """Override attribute access to inherit from parent Album/Artist if not set"""
+
+        inherited_attrs = {
+            "poster_path",
+            "language",
+        }
+
+        value = object.__getattribute__(self, name)
+
+        if name in inherited_attrs and not value:
+            try:
+                return getattr(self.parent.parent, name, value)
+            except AttributeError:
+                pass
+
+        return value
+
+    @property
+    def log_string(self):
+        try:
+            track_num = self.track_number
+            parent_log = self.parent.log_string
+            if track_num is not None:
+                return f"{parent_log} T{track_num:02}"
+        except (AttributeError, DetachedInstanceError):
+            pass
+
+        if self.track_number is not None:
+            return f"Track {self.track_number}"
+
+        return self.title or "Unknown Track"
+
+    def __repr__(self):
+        return f"Track:{self.log_string}:{self.state.name}"
+
+    def __hash__(self):
+        return super().__hash__()
+
+    def copy(self, other: "Self", copy_parent: bool = True) -> Self:
+        super()._copy_common_attributes(other)
+
+        self.track_number = other.track_number
+        self.duration_ms = other.duration_ms
+        self.isrc = other.isrc
+
+        if copy_parent and other.parent:
+            self.parent = Album().copy(other.parent)
+
+        return self
 
 
 def _set_nested_attr(obj: object, key: str, value: Any):

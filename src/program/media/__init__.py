@@ -1,4 +1,4 @@
-from .item import Episode, MediaItem, Movie, Season, Show
+from .item import Album, Artist, Episode, MediaItem, Movie, Season, Show, Track
 from .state import States
 from .filesystem_entry import FilesystemEntry
 from .media_entry import MediaEntry
@@ -10,11 +10,14 @@ from .stream import (
 )
 
 __all__ = [
+    "Album",
+    "Artist",
     "Episode",
     "MediaItem",
     "Movie",
     "Season",
     "Show",
+    "Track",
     "States",
     "FilesystemEntry",
     "MediaEntry",
