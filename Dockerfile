@@ -4,7 +4,7 @@
 FROM python:3.13-alpine AS builder
 
 # Install only the necessary build dependencies
-RUN apk add --no-cache gcc musl-dev libffi-dev python3-dev build-base curl curl-dev openssl-dev pkgconf
+RUN apk add --no-cache gcc musl-dev libffi-dev python3-dev build-base curl curl-dev openssl-dev fuse3-dev pkgconf
 
 # Install uv (fast package manager)
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -27,7 +27,7 @@ LABEL name="Riven" \
       url="https://github.com/rivenmedia/riven"
 
 # Install only runtime dependencies
-RUN apk add --no-cache curl libcurl shadow unzip ffmpeg libpq postgresql17-client
+RUN apk add --no-cache curl libcurl shadow unzip ffmpeg libpq fuse3 postgresql17-client
 
 WORKDIR /riven
 
