@@ -126,6 +126,9 @@ class PrismFilesystemService(Runner[PrismModel]):
         item.store_state(States.Symlinked)
         yield RunnerResult(media_items=[item])
 
+    def close(self) -> None:
+        """No-op: PrismFilesystemService has no resources to release."""
+
     def _poll_for_path(self, search_dir: Path, expected: str, timeout: int) -> Path | None:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
