@@ -126,6 +126,8 @@ class PrismFilesystemService(Runner[PrismModel]):
         item.store_state(States.Symlinked)
         yield RunnerResult(media_items=[item])
 
+    riven_vfs = None  # FilesystemService exposes this; item._reset() checks it
+
     def close(self) -> None:
         """No-op: PrismFilesystemService has no resources to release."""
 
