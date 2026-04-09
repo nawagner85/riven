@@ -931,6 +931,21 @@ class StreamModel(Observable):
     )
 
 
+# Prism Filesystem Backend
+
+
+class PrismModel(Observable):
+    enabled: bool = Field(default=False, description="Use Prism mount instead of RivenVFS")
+    mount_path: Path = Field(
+        default=Path("/mnt/user-data/mounts/rdunrar2"),
+        description="Path to the Prism FUSE mount",
+    )
+    poll_timeout_seconds: int = Field(
+        default=60, ge=5,
+        description="Seconds to wait for file to appear in Prism mount after download",
+    )
+
+
 class AppModel(Observable):
     version: str = Field(default_factory=get_version, description="Application version")
     api_key: str = Field(default="", description="API key for Riven API access")
@@ -995,6 +1010,10 @@ class AppModel(Observable):
     )
     stream: StreamModel = Field(
         default_factory=lambda: StreamModel(), description="Stream configuration"
+    )
+    prism: "PrismModel" = Field(
+        default_factory=lambda: PrismModel(),
+        description="Prism FUSE mount filesystem backend configuration",
     )
 
     @field_validator("log_level", mode="before")
